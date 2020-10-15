@@ -41,6 +41,9 @@
 
 #define INIT_TTL 255
 #define PACKET_DUMP_SIZE 1024
+#define ip_protocol_udp 17
+#define ip_protocol_tcp 6
+#define INITIAL_SUM 0
 
 /* forward declare */
 struct sr_if;
@@ -81,8 +84,12 @@ void sr_init(struct sr_instance *);
 void sr_handlepacket(struct sr_instance *, uint8_t *, unsigned int, char *);
 /* -- sr_router.c helper functions -- */
 int amithetarget(struct sr_instance *sr, uint32_t tip);
-void setup_and_send_ARPreply(struct sr_instance *sr, uint8_t *packet /* lent */, unsigned int len);
+void setup_and_send_ARPreply(struct sr_instance *sr, uint8_t *packet, unsigned int len);
 struct sr_if *get_interface_from_ip(struct sr_instance *sr, const uint32_t ip);
+/*void send_icmp_t11_c0_request(struct sr_instance *sr, uint8_t *packet, unsigned int len);*/
+void forward_ip_request(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
+void send_icmp_port_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
+void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 
 /* -- sr_if.c -- */
 void sr_add_interface(struct sr_instance *, const char *);
