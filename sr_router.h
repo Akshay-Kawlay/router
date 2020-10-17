@@ -85,13 +85,15 @@ void sr_init(struct sr_instance *);
 void sr_handlepacket(struct sr_instance *, uint8_t *, unsigned int, char *);
 /* -- sr_router.c helper functions -- */
 int amithetarget(struct sr_instance *sr, uint32_t tip);
-void setup_and_send_ARPreply(struct sr_instance *sr, uint8_t *packet, unsigned int len);
+void setup_and_send_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len);
 struct sr_if *get_interface_from_ip(struct sr_instance *sr, const uint32_t ip);
 void send_icmp_ttl_expired(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 void forward_ip_request(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 void send_icmp_port_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 void send_icmp_net_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
+void send_icmp_host_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
+void handle_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 struct sr_rt *sr_rt_lpm_lookup(struct sr_instance *sr, sr_ip_hdr_t *ihdr);
 
 /* -- sr_if.c -- */
