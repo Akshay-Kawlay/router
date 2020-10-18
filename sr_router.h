@@ -1,3 +1,9 @@
+/*
+ * Name: Akshay Kawlay
+ * Userid: kawlayak
+ * File Description: 
+ * 
+ * */
 /*-----------------------------------------------------------------------------
  * File: sr_router.h
  * Date: ?
@@ -45,6 +51,7 @@
 #define ip_protocol_tcp 6
 #define INITIAL_SUM 0
 #define TOS_BEST_EFFORT 0
+#define IP_v 4
 
 /* forward declare */
 struct sr_if;
@@ -94,7 +101,7 @@ void send_icmp_net_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned
 void send_icmp_host_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 void handle_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
-struct sr_rt *sr_rt_lpm_lookup(struct sr_instance *sr, sr_ip_hdr_t *ihdr);
+struct sr_rt *sr_rt_lpm_lookup(struct sr_instance *sr, uint32_t ip);
 
 /* -- sr_if.c -- */
 void sr_add_interface(struct sr_instance *, const char *);

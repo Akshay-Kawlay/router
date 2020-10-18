@@ -1,3 +1,11 @@
+
+/*
+ * Name: Akshay Kawlay
+ * Userid: kawlayak
+ * File Description: 
+ * 
+ * */
+
 /*
  *  Copyright (c) 1998, 1999, 2000 Mike D. Schiffman <mike@infonexus.com>
  *  All rights reserved.
@@ -72,6 +80,8 @@
 #endif
 #endif
 #define ICMP_DATA_SIZE 28
+#define BYTES_PER_ROW 4
+#define ICMP_PACKET_SIZE(ihdr) (ntohs(ihdr->ip_len) - (ihdr->ip_hl * BYTES_PER_ROW)))
 
 /* ICMP types */
 #define ICMP_ECHO_REPLY 0
