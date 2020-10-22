@@ -153,7 +153,7 @@ void sr_handlepacket(struct sr_instance *sr,
       /* validate icmp checksum */
       temp_sum = icmphdr->icmp_sum;
       icmphdr->icmp_sum = 0;
-      if (temp_sum != cksum(icmphdr, ICMP_PACKET_SIZE(ihdr))
+      if (temp_sum != cksum(icmphdr, ICMP_PACKET_SIZE(ihdr)))
       {
         fprintf(stderr, "\nReceived ICMP packet with invalid checksum\n");
         fprintf(stderr, "\nCalculated : %d Received : %d\n", cksum(icmphdr, sizeof(sr_icmp_hdr_t)), temp_sum);
@@ -186,6 +186,11 @@ void sr_handlepacket(struct sr_instance *sr,
       arp_hdr = (sr_arp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
       if (amithetarget(sr, arp_hdr->ar_tip))
       {
+        if (ntohs(arp_hdr->ar_hrd) != arp_hrd_ethernet)
+        {
+          fprintf(stderr, "ARP reply not correct ethernet format\n");
+          return;
+        }
         if (ntohs(arp_hdr->ar_op) == arp_op_request) /* ARP Request to me */
         {
           fprintf(stderr, "ARP Request Received from address : ");
@@ -202,6 +207,10 @@ void sr_handlepacket(struct sr_instance *sr,
           fprintf(stderr, "ARP OP not recognised : %d\n", ntohs(arp_hdr->ar_op));
         }
       }
+      else
+      {
+        fprintf(stderr, "Received ARP request not addressed to me");
+      }
     }
   }
   else /* Drop Packet */
@@ -211,16 +220,12 @@ void sr_handlepacket(struct sr_instance *sr,
 
 } /* end sr_handlepacket */
 
-/* Helper Functions */
+/* ---------------------------------------------------------------- */
+/* ---------------------- Helper Functions ------------------------ */
+/* ---------------------------------------------------------------- */
 
-/*---------------------------------------------------------------------
- * Method: amithetarget(struct sr_instance *sr, uint32_t tip)
- * Scope:  Local
- *
- * This method is called to check if the target ip matches with router's 
- * one of the interface ips
- * Returns 1 if it is the target and 0 otherwise
- *---------------------------------------------------------------------*/
+/* This method is called to check if the target ip matches with router's 
+ * one of the interface ips */
 int amithetarget(struct sr_instance *sr, uint32_t tip)
 {
   struct sr_if *if_walker = 0;
@@ -246,11 +251,9 @@ int amithetarget(struct sr_instance *sr, uint32_t tip)
     /*sr_print_if(if_walker);*/
   }
   return 0;
-}
+} /* -- amithetarget -- */
 
-/* This method is called to check if the target ip matches with router's 
- * one of the interface ips
- *---------------------------------------------------------------------*/
+/* This method creates and send an ARP reply when an ARP request is received */
 void setup_and_send_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len)
 {
   uint8_t *packet_copy = malloc(len);
@@ -260,6 +263,7 @@ void setup_and_send_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned 
   sr_arp_hdr_t *ahdr = (sr_arp_hdr_t *)(packet_copy + sizeof(sr_ethernet_hdr_t));
   sr_arp_hdr_t *old_ahdr = (sr_arp_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   unsigned char mac_addr[ETHER_ADDR_LEN];
+
   struct sr_if *intface = get_interface_from_ip(sr, old_ahdr->ar_tip);
   if (!intface)
   {
@@ -271,6 +275,7 @@ void setup_and_send_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned 
   memcpy(mac_addr, intface->addr, ETHER_ADDR_LEN);
   memcpy(ehdr->ether_dhost, old_ehdr->ether_shost, ETHER_ADDR_LEN);
   memcpy(ehdr->ether_shost, (uint8_t *)mac_addr, ETHER_ADDR_LEN);
+  ehdr->ether_type = htons(ethertype_arp);
 
   /* set arp data */
   ahdr->ar_op = htons(arp_op_reply);
@@ -280,14 +285,14 @@ void setup_and_send_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned 
   memcpy(ahdr->ar_tha, old_ahdr->ar_sha, ETHER_ADDR_LEN);
 
   /*fprintf(stderr, "printing packet to be sent\n");*/
-  print_hdr_eth(packet_copy);
-  print_hdr_arp(packet_copy + sizeof(sr_ethernet_hdr_t));
+  /*print_hdr_eth(packet_copy);
+  print_hdr_arp(packet_copy + sizeof(sr_ethernet_hdr_t));*/
 
   sr_send_packet(sr, packet_copy, len, intface->name);
 
   free(packet_copy);
   return;
-} /* -- setupARPreply -- */
+} /* -- setup_and_send_arp_reply -- */
 
 void handle_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
 {
@@ -313,9 +318,9 @@ void handle_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len,
   {
     ehdr = (sr_ethernet_hdr_t *)packet_queue->buf;
     send_if = sr_get_interface(sr, (const char *)packet_queue->iface);
-    if (send_if == NULL)
+    if (send_if == 0)
     {
-      fprintf(stderr, "ARP request packet has invalid router interface\n");
+      fprintf(stderr, "ARP request packet addressed to an invalid router interface\n");
       continue;
     }
 
@@ -331,11 +336,10 @@ void handle_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len,
 
   sr_arpreq_destroy(&sr->cache, inserted_req);
   return;
-}
+} /* -- handle_arp_reply -- */
 
 /* Given an interface ip return the interface record or 0 if it doesn't
- * exist.
- *---------------------------------------------------------------------*/
+ * exist */
 struct sr_if *get_interface_from_ip(struct sr_instance *sr, const uint32_t ip)
 {
   struct sr_if *if_walker = 0;
@@ -358,8 +362,88 @@ struct sr_if *get_interface_from_ip(struct sr_instance *sr, const uint32_t ip)
   return 0;
 } /* -- get_interface_from_ip -- */
 
-/* Sends ICMP ttl expired reply to the source
- *---------------------------------------------------------------------*/
+/* Performs longest prefix match in the routing table */
+struct sr_rt *sr_rt_lpm_lookup(struct sr_instance *sr, uint32_t ip)
+{
+  struct sr_rt *rt_cur_row, *rt_lpm_row;
+  uint32_t in_masked_ip, rt_masked_ip;
+  /* sr_print_routing_table(sr); */
+  rt_cur_row = sr->routing_table;
+  rt_lpm_row = NULL;
+  while (rt_cur_row != (struct sr_rt *)NULL)
+  {
+    rt_masked_ip = rt_cur_row->dest.s_addr & rt_cur_row->mask.s_addr;
+    in_masked_ip = ip & rt_cur_row->mask.s_addr;
+    if (rt_masked_ip == in_masked_ip)
+    {
+      rt_lpm_row = rt_lpm_row ? ((rt_cur_row->mask.s_addr > rt_lpm_row->mask.s_addr) ? rt_cur_row : rt_lpm_row) : rt_cur_row;
+    }
+    rt_cur_row = rt_cur_row->next;
+  }
+  return rt_lpm_row;
+} /* -- sr_rt_lpm_lookup -- */
+
+/* Forwards the packet whose ip is not addressed to router's interfaces */
+void forward_ip_request(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
+{
+  sr_ip_hdr_t *ihdr;
+  sr_ethernet_hdr_t *ehdr;
+  struct sr_rt *rt_row;
+  struct sr_if *intface;
+  struct sr_arpentry *arpcache_row;
+  struct sr_arpreq *req;
+  fprintf(stderr, "\nForwarding Request\n");
+
+  /* Sanity-check already done in caller function */
+
+  ehdr = (sr_ethernet_hdr_t *)(packet);
+  ihdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
+
+  /* Re-compute the ip checksum over the modified header; TTL decremented in caller function */
+  ihdr->ip_sum = INITIAL_SUM;
+  ihdr->ip_sum = cksum(ihdr, sizeof(sr_ip_hdr_t));
+
+  /* lookup longest prefix match in routing table to get the next-hop ip */
+  rt_row = sr_rt_lpm_lookup(sr, ihdr->ip_dst);
+
+  /* if dest IP addr not in routing table; send icmp net unreachable */
+  if (rt_row == (struct sr_rt *)NULL)
+  {
+    send_icmp_net_unreachable(sr, packet, len, interface);
+    return;
+  }
+
+  /* lookup ARP cache to get next hop MAC */
+  arpcache_row = sr_arpcache_lookup(&sr->cache, ihdr->ip_dst);
+  if (arpcache_row == NULL)
+  {
+    /* if cache miss, send an ARP request for the next-hop IP and add the
+     * packet to the queue of packets waiting on this ARP request */
+    fprintf(stderr, "\nARP Cache Miss for ip : ");
+    print_addr_ip_int(ntohl(ihdr->ip_dst));
+    req = sr_arpcache_queuereq(&sr->cache, rt_row->gw.s_addr, packet, len, rt_row->interface);
+    handle_arpreq(sr, req);
+    return;
+  }
+
+  intface = sr_get_interface(sr, rt_row->interface);
+  if (intface == 0)
+  {
+    fprintf(stderr, "Forwarding Packet : Invalid router interface name");
+    return;
+  }
+
+  /* set the new src, dest mac addr of packet */
+  memcpy(ehdr->ether_shost, intface->addr, ETHER_ADDR_LEN);
+  memcpy(ehdr->ether_dhost, (uint8_t *)arpcache_row->mac, ETHER_ADDR_LEN);
+
+  sr_send_packet(sr, packet, len, rt_row->interface);
+  free(arpcache_row);
+  return;
+} /* -- forward_ip_request -- */
+
+/* Sends ICMP ttl expired reply to the source whenever a packet with 
+ * TTL <= 1 is received */
 void send_icmp_ttl_expired(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
 {
   uint8_t *t3_packet;
@@ -387,7 +471,18 @@ void send_icmp_ttl_expired(struct sr_instance *sr, uint8_t *packet, unsigned int
 
   /* get router's out interface ip address */
   struct sr_rt *rt_row = sr_rt_lpm_lookup(sr, ihdr->ip_src);
+  if (rt_row == (struct sr_rt *)NULL)
+  {
+    fprintf(stderr, "ICMP TTL : No LPM match");
+    /*send_icmp_net_unreachable(sr, packet, len, interface);*/
+    return;
+  }
   struct sr_if *intface = sr_get_interface(sr, rt_row->interface);
+  if (intface == 0)
+  {
+    fprintf(stderr, "ICMP TTL : Invalid router interface name");
+    return;
+  }
 
   /* set IP header */
   t3_ihdr->ip_src = intface->ip;
@@ -420,85 +515,10 @@ void send_icmp_ttl_expired(struct sr_instance *sr, uint8_t *packet, unsigned int
   free(t3_packet);
 
   return;
-}
+} /* -- send_icmp_ttl_expired -- */
 
-struct sr_rt *sr_rt_lpm_lookup(struct sr_instance *sr, uint32_t ip)
-{
-  struct sr_rt *rt_cur_row, *rt_lpm_row;
-  uint32_t in_masked_ip, rt_masked_ip;
-  /* sr_print_routing_table(sr); */
-  rt_cur_row = sr->routing_table;
-  rt_lpm_row = NULL;
-  while (rt_cur_row != (struct sr_rt *)NULL)
-  {
-    rt_masked_ip = rt_cur_row->dest.s_addr & rt_cur_row->mask.s_addr;
-    in_masked_ip = ip & rt_cur_row->mask.s_addr;
-    if (rt_masked_ip == in_masked_ip)
-    {
-      rt_lpm_row = rt_lpm_row ? ((rt_cur_row->mask.s_addr > rt_lpm_row->mask.s_addr) ? rt_cur_row : rt_lpm_row) : rt_cur_row;
-    }
-    rt_cur_row = rt_cur_row->next;
-  }
-  return rt_lpm_row;
-}
-
-void forward_ip_request(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
-{
-  sr_ip_hdr_t *ihdr;
-  sr_ethernet_hdr_t *ehdr;
-  struct sr_rt *rt_row;
-  struct sr_if *intface;
-  struct sr_arpentry *arpcache_row;
-  struct sr_arpreq *req;
-  fprintf(stderr, "\nForwarding Request\n");
-
-  /* Sanity-check already done in caller function */
-
-  ehdr = (sr_ethernet_hdr_t *)(packet);
-  ihdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
-
-  /* Re-compute the ip checksum over the modified header; TTL decremented in caller function */
-  ihdr->ip_sum = INITIAL_SUM;
-  ihdr->ip_sum = cksum(ihdr, sizeof(sr_ip_hdr_t));
-
-  /* lookup longest prefix match in routing table to get the next-hop ip */
-  rt_row = sr_rt_lpm_lookup(sr, ihdr->ip_dst);
-  fprintf(stderr, "\nlpm lookup result : %s\n", rt_row->interface);
-  fprintf(stderr, "\nlpm lookup gw : ");
-  print_addr_ip_int(ntohl(rt_row->gw.s_addr));
-  fprintf(stderr, "\nlpm lookup dest : %d\n", rt_row->dest.s_addr);
-  print_addr_ip_int(ntohl(rt_row->dest.s_addr));
-
-  if (rt_row == (struct sr_rt *)NULL) /* Dest IP addr not in routing table; send icmp net unreachable */
-  {
-    send_icmp_net_unreachable(sr, packet, len, interface);
-    return;
-  }
-
-  /* lookup ARP cache to get next hop MAC */
-  arpcache_row = sr_arpcache_lookup(&sr->cache, ihdr->ip_dst);
-  if (arpcache_row == NULL)
-  {
-    /* if cache miss, send an ARP request for the next-hop IP and add the
-     * packet to the queue of packets waiting on this ARP request */
-    fprintf(stderr, "\nARP Cache Miss for ip : ");
-    print_addr_ip_int(ntohl(ihdr->ip_dst));
-    req = sr_arpcache_queuereq(&sr->cache, rt_row->gw.s_addr, packet, len, rt_row->interface);
-    handle_arpreq(sr, req);
-    return;
-  }
-
-  intface = sr_get_interface(sr, rt_row->interface);
-
-  /* set the new src, dest mac addr of packet */
-  memcpy(ehdr->ether_shost, intface->addr, ETHER_ADDR_LEN);
-  memcpy(ehdr->ether_dhost, (uint8_t *)arpcache_row->mac, ETHER_ADDR_LEN);
-
-  sr_send_packet(sr, packet, len, rt_row->interface);
-  free(arpcache_row);
-  return;
-}
-
+/* Sends ICMP net unreachable msg whenever a packet's dest ip is not in 
+ * the routing table */
 void send_icmp_net_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
 {
   uint8_t *t3_packet;
@@ -525,8 +545,17 @@ void send_icmp_net_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned
   t3_ihdr = (sr_ip_hdr_t *)(t3_packet + sizeof(sr_ethernet_hdr_t));
 
   /* get router's out interface ip address */
-  struct sr_rt *rt_row = sr_rt_lpm_lookup(sr, ihdr->ip_src);
-  struct sr_if *intface = sr_get_interface(sr, rt_row->interface);
+  /*struct sr_rt *rt_row = sr_rt_lpm_lookup(sr, ihdr->ip_src);*/
+  /*if (rt_row == (struct sr_rt *)NULL)
+  {
+    return;
+  }*/
+  struct sr_if *intface = sr_get_interface(sr, interface);
+  if (intface == 0)
+  {
+    fprintf(stderr, "ICMP net unreachable : Invalid router interface name");
+    return;
+  }
 
   /* set IP header */
   t3_ihdr->ip_src = intface->ip;
@@ -559,8 +588,10 @@ void send_icmp_net_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned
   free(t3_packet);
 
   return;
-}
+} /* -- send_icmp_net_unreachable -- */
 
+/* Sends ICMP port unreachable msg whenever a tcp or udp packet is addressed to the 
+ * router's interfaces */
 void send_icmp_port_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
 {
   uint8_t *t3_packet;
@@ -581,6 +612,7 @@ void send_icmp_port_unreachable(struct sr_instance *sr, uint8_t *packet, unsigne
   /* reverse src and dest MAC addr */
   memcpy(t3_ehdr->ether_shost, ehdr->ether_dhost, ETHER_ADDR_LEN);
   memcpy(t3_ehdr->ether_dhost, ehdr->ether_shost, ETHER_ADDR_LEN);
+  t3_ehdr->ether_type = htons(ethertype_ip);
 
   ihdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   t3_ihdr = (sr_ip_hdr_t *)(t3_packet + sizeof(sr_ethernet_hdr_t));
@@ -614,8 +646,10 @@ void send_icmp_port_unreachable(struct sr_instance *sr, uint8_t *packet, unsigne
   free(t3_packet);
 
   return;
-}
+} /* -- send_icmp_port_unreachable -- */
 
+/* Sends ICMP host unreachable msg after 5 ARP requests have been sent 
+ * and no corresponding ARP reply received */
 void send_icmp_host_unreachable(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
 {
   uint8_t *t3_packet;
@@ -636,6 +670,7 @@ void send_icmp_host_unreachable(struct sr_instance *sr, uint8_t *packet, unsigne
   /* reverse src and dest MAC addr */
   memcpy(t3_ehdr->ether_shost, ehdr->ether_dhost, ETHER_ADDR_LEN);
   memcpy(t3_ehdr->ether_dhost, ehdr->ether_shost, ETHER_ADDR_LEN);
+  t3_ehdr->ether_type = htons(ethertype_ip);
 
   ihdr = (sr_ip_hdr_t *)(packet + sizeof(sr_ethernet_hdr_t));
   t3_ihdr = (sr_ip_hdr_t *)(t3_packet + sizeof(sr_ethernet_hdr_t));
@@ -669,8 +704,10 @@ void send_icmp_host_unreachable(struct sr_instance *sr, uint8_t *packet, unsigne
   free(t3_packet);
 
   return;
-}
+} /* -- send_icmp_host_unreachable -- */
 
+/* Sends ICMP echo reply msg whenever an ICMP echo request (addressed to one of router's
+ * interfaces) is received */
 void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface)
 {
   sr_ethernet_hdr_t *ehdr = (sr_ethernet_hdr_t *)packet;
@@ -693,11 +730,11 @@ void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsigned int 
   icmphdr->icmp_type = ICMP_ECHO_REPLY;
   icmphdr->icmp_code = DEFAULT_CODE;
   icmphdr->icmp_sum = INITIAL_SUM;
-  icmphdr->icmp_sum = cksum(icmphdr, sizeof(sr_icmp_hdr_t));
+  icmphdr->icmp_sum = cksum(icmphdr, ICMP_PACKET_SIZE(ihdr));
 
   fprintf(stderr, "\nPrinting packet to be sent as icmp echo\n");
   print_hdrs(packet, len);
   sr_send_packet(sr, packet, len, interface);
 
   return;
-}
+} /* -- send_icmp_echo_reply -- */

@@ -80,8 +80,6 @@
 
 #define SR_ARPCACHE_SZ 100
 #define SR_ARPCACHE_TO 15.0
-#define SR_ARPBROADCAST_ADDR 0xFF
-#define PROTOCOL_ADDR_LEN 4
 
 struct sr_packet
 {
@@ -159,10 +157,5 @@ void sr_arpcache_dump(struct sr_arpcache *cache);
 int sr_arpcache_init(struct sr_arpcache *cache);
 int sr_arpcache_destroy(struct sr_arpcache *cache);
 void *sr_arpcache_timeout(void *cache_ptr);
-
-/* helper-functions */
-void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
-void send_arp_request_broadcast(struct sr_instance *sr, struct sr_arpreq *req);
-struct sr_if *get_interface_from_mac(struct sr_instance *sr, uint8_t *mac);
 
 #endif

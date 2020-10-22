@@ -24,8 +24,7 @@
 /* 
   This function gets called every second. For each request sent out, we keep
   checking whether we should resend an request or destroy the arp request.
-  See the comments in the header file for an idea of what it should look like.
-*/
+  See the comments in the header file for an idea of what it should look like. */
 void sr_arpcache_sweepreqs(struct sr_instance *sr)
 {
     /* Fill this in */
@@ -36,9 +35,10 @@ void sr_arpcache_sweepreqs(struct sr_instance *sr)
         handle_arpreq(sr, req);
         req = next;
     }
-}
+} /* -- sr_arpcache_sweepreqs -- */
 
-/* handle_arpreq handles sending ARP requests */
+/* handle_arpreq handles sending ARP requests every second and 
+ * if the more than 5 requests sent, it will send ICMP host unreachable */
 void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req)
 {
     time_t time_now;
@@ -50,7 +50,7 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req)
 
     if (difftime(time_now, req->sent) > 1.0)
     {
-        if (req->times_sent >= 5)
+        if (req->times_sent >= ARP_REQUEST_TIMEOUT_LIMIT)
         {
             /* send ICMP host unreachable for all packets in request queue*/
             req_packet = req->packets;
@@ -77,8 +77,9 @@ void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req)
             req->sent = time_now;
         }
     }
-}
+} /* -- handle_arpreq -- */
 
+/* This function handles ARP request broadcast */
 void send_arp_request_broadcast(struct sr_instance *sr, struct sr_arpreq *req)
 {
     uint8_t *arp_packet, len;
@@ -120,8 +121,9 @@ void send_arp_request_broadcast(struct sr_instance *sr, struct sr_arpreq *req)
 
     free(arp_packet);
     return;
-}
+} /* -- send_arp_request_broadcast -- */
 
+/* This function gets the interface with the corresponding mac address */
 struct sr_if *get_interface_from_mac(struct sr_instance *sr, uint8_t *mac)
 {
     struct sr_if *if_walker = 0;
@@ -142,7 +144,7 @@ struct sr_if *get_interface_from_mac(struct sr_instance *sr, uint8_t *mac)
     }
 
     return 0;
-}
+} /* -- get_interface_from_mac -- */
 
 /* You should not need to touch the rest of this code. */
 

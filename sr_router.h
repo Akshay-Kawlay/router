@@ -53,6 +53,27 @@
 #define TOS_BEST_EFFORT 0
 #define IP_v 4
 
+#define BYTES_PER_ROW 4
+#define ICMP_PACKET_SIZE(ihdr) (ntohs(ihdr->ip_len) - (ihdr->ip_hl * BYTES_PER_ROW))
+
+/* ICMP types */
+#define ICMP_ECHO_REPLY 0
+#define ICMP_UNREACHABLE 3
+#define ICMP_ECHO_REQUEST 8
+#define ICMP_TTL_EXPIRED 11
+
+/* ICMP codes */
+#define DEFAULT_CODE 0
+#define ICMP_NET_UNREACHABLE 0
+#define ICMP_HOST_UNREACHABLE 1
+#define ICMP_PORT_UNREACHABLE 3
+#define ICMP_CODE_TTL_EXPIRED 0
+
+/* ARPcache constants */
+#define SR_ARPBROADCAST_ADDR 0xFF
+#define ARP_REQUEST_TIMEOUT_LIMIT 5
+#define PROTOCOL_ADDR_LEN 4
+
 /* forward declare */
 struct sr_if;
 struct sr_rt;
@@ -90,7 +111,7 @@ int sr_read_from_server(struct sr_instance *);
 /* -- sr_router.c -- */
 void sr_init(struct sr_instance *);
 void sr_handlepacket(struct sr_instance *, uint8_t *, unsigned int, char *);
-/* -- sr_router.c helper functions -- */
+/* - helper functions - */
 int amithetarget(struct sr_instance *sr, uint32_t tip);
 void setup_and_send_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len);
 struct sr_if *get_interface_from_ip(struct sr_instance *sr, const uint32_t ip);
@@ -102,6 +123,12 @@ void send_icmp_host_unreachable(struct sr_instance *sr, uint8_t *packet, unsigne
 void send_icmp_echo_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 void handle_arp_reply(struct sr_instance *sr, uint8_t *packet, unsigned int len, char *interface);
 struct sr_rt *sr_rt_lpm_lookup(struct sr_instance *sr, uint32_t ip);
+
+/* -- sr_arpcache.c -- */
+/* - helper functions - */
+void handle_arpreq(struct sr_instance *sr, struct sr_arpreq *req);
+void send_arp_request_broadcast(struct sr_instance *sr, struct sr_arpreq *req);
+struct sr_if *get_interface_from_mac(struct sr_instance *sr, uint8_t *mac);
 
 /* -- sr_if.c -- */
 void sr_add_interface(struct sr_instance *, const char *);
